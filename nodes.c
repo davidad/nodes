@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 double nonlinearity(double x) {
-  return (double)(x >= 0);
+  return x >= 0;
 }
 
 struct node {
@@ -24,19 +24,18 @@ node_p make_node(gate_type t, int n_inputs, node_p inputs) {
   result->n_inputs = n_inputs;
   result->inputs = inputs;
   result->factors = malloc(n_inputs*sizeof(double));
-  int i;
-  double factor=1.0;
   switch(t) {
     case AND:
-      result->affine_term=-(n_inputs);
+      result->affine_term = -(n_inputs);
       break;
 
     case OR:
-      result->affine_term=-1.0;
+      result->affine_term = -1.0;
       break;
   };
+  int i;
   for(i=0;i<n_inputs;i++) {
-    result->factors[i]=factor;
+    result->factors[i] = 1.0;
   }
   result->output = 0.0;
   return result;
@@ -53,9 +52,10 @@ double run_node(node_p n) {
 }
 
 int main(int argc, char* argv[]) {
+  if(argc<3) printf("Usage: %s <input 1> <input 2>\n",argv[0]), exit(1);
   struct node inputs[] = {
-    {.output = 1.0},
-    {.output = 0.0}
+    {.output = strtod(argv[1],NULL)},
+    {.output = strtod(argv[2],NULL)}
   };
   node_p and_node = make_node(AND,2,inputs);
   run_node(and_node);
