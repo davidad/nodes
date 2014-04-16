@@ -1,3 +1,5 @@
+#include <search.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -6,9 +8,11 @@ double nonlinearity(double x) {
 }
 
 struct node {
-  int n_inputs;
+  char* name;
+  unsigned int n_inputs;
   double affine_term;
   double output;
+  struct node* run_next;
   struct connection {
     double factor;
     struct node* input;
@@ -21,13 +25,13 @@ typedef enum {
   OR
 } gate_type;
 
-node_p make_node(gate_type t, int n_inputs, node_p* inputs) {
+node_p make_node(gate_type t, unsigned int n_inputs, node_p* inputs) {
   node_p result = malloc(sizeof(struct node)+n_inputs*sizeof(struct connection));
   result->n_inputs = n_inputs;
 
   switch(t) {
     case AND:
-      result->affine_term = -(n_inputs);
+      result->affine_term = -(double)(n_inputs);
       break;
 
     case OR:
@@ -49,35 +53,103 @@ double run_node(node_p n) {
   int i;
   struct connection* cp = n->connections;
   for(i=0;i<n->n_inputs;i++,cp++) {
+    printf("  %s <-- %lf --- %s\n",n->name,cp->input->output,cp->input->name);
     accumulator += (cp->input->output)*(cp->factor);
+    printf("  accumulator: %lf\n",accumulator);
   }
   n->output = nonlinearity(accumulator);
+  printf("node %s outputs %lf\n\n",n->name,n->output);
   return n->output;
 }
 
-int main(int argc, char* argv[]) {
-  if(argc<4) printf("Usage: %s <input 1> <input 2>\n",argv[0]), exit(1);
-  struct node inputs[] = {
-    {.output = strtod(argv[1],NULL)},
-    {.output = strtod(argv[2],NULL)},
-    {.output = strtod(argv[3],NULL)}
-  };
-/*
- * input[0] ->  | and_node1 ->                               |
- * input[1] ->  |            | and_node2 ->                  | or_node1 ->
- * input[2] ->               |             | and_node3 ->    |
- * input[0] ->                             |
- */
-  node_p input_ps[] = { &inputs[0], &inputs[1], &inputs[2], &inputs[0] };
-  node_p and_node1 = make_node(AND,2,input_ps);
-  node_p and_node2 = make_node(AND,2,input_ps+1);
-  node_p and_node3 = make_node(AND,2,input_ps+2);
-  node_p layer1_ps[] = { and_node1, and_node2, and_node3 };
-  node_p or_node1 = make_node(OR,3,layer1_ps);
-  node_p nodes_to_run[] = { and_node1, and_node2, and_node3, or_node1 };
-  for(int i=0;i<sizeof(nodes_to_run)/sizeof(node_p);i++) {
-    run_node(nodes_to_run[i]);
+void syntax_error(FILE* f,const char* msg) {
+  char current_line[1024];
+  if(fscanf(f,"%1024[^\n]",current_line)!=1) {
+    do fseek(f,-1,SEEK_CUR); while (getc(f)!='\n' && !fseek(f,-1,SEEK_CUR));
+    if(fscanf(f,"%1024[^\n]",current_line)!=1) fprintf(stderr,"Syntax error at position %ld: %s\n",ftell(f),msg), exit(1);
   }
-  printf("The output is %lf\n",or_node1->output);
+  fprintf(stderr,"Syntax error at \"%s\": %s\n",current_line,msg), exit(1);
+}
+
+static int cmp_name(const void* a, const void* b) {
+  return strcmp(((node_p)a)->name,((node_p)b)->name);
+}
+
+int main(int argc, char* argv[]) {
+#define node_name_maxlen 256
+#define node_name_fmt "%256[$0-9a-zA-Z_] "
+  if(argc<2) fprintf(stderr,"Usage: %s <circuit file> [<input value> <input value> ...]\n",argv[0]), exit(1);
+  FILE* f = fopen(argv[1],"r"); if(f==NULL) perror("Error opening circuit file");
+  unsigned int n_inputs, i;
+  if(fscanf(f,"inputs: %u ",&n_inputs)!=1) syntax_error(f,"expected number of inputs");
+  node_p* global_inputs = malloc(sizeof(node_p)*n_inputs);
+  void* name_lookup[1] = {NULL};
+  for(i=0;i<n_inputs;i++) {
+    node_p n = malloc(sizeof(struct node));
+    n->name=malloc(node_name_maxlen);
+    if(fscanf(f,node_name_fmt,n->name)!=1) syntax_error(f,"expected input name");
+    realloc(n->name,strlen(n->name)+1);
+    tsearch((void*)n,name_lookup,cmp_name);
+    global_inputs[i]=n;
+  }
+
+  node_p run_list_head=NULL, run_list_tail=NULL;
+  do {
+    char c;
+    if(fscanf(f,"%1[&|] ",&c)!=1) break;
+
+    char input_name[node_name_maxlen];
+    unsigned int n_inputs = 0;
+    node_p* inputs = NULL;
+    while(fscanf(f,node_name_fmt,input_name)==1) {
+      inputs = realloc(inputs,++n_inputs*sizeof(node_p));
+      struct node n_search[1] = {{.name = input_name}};
+      inputs[n_inputs-1] = *(node_p*)tfind((void*)n_search,name_lookup,cmp_name);
+      if(!inputs[n_inputs-1]) fprintf(stderr,"no such node %s",input_name),exit(2);
+    }
+    
+    gate_type t;
+    switch(c) {
+      case '&': t=AND; break;
+      case '|': t=OR;  break;
+    }
+
+    node_p n = make_node(t,n_inputs,inputs);
+    free(inputs);
+
+    n->name=malloc(node_name_maxlen);
+    if(fscanf(f,"-> " node_name_fmt,n->name)!=1) syntax_error(f,"expected node name");
+    realloc(n->name,strlen(n->name)+1);
+    tsearch((void*)n,name_lookup,cmp_name);
+    
+    if(!run_list_head) run_list_head = n;
+    if(run_list_tail) run_list_tail->run_next=n;
+    run_list_tail=n;
+  } while(!feof(f) && !ferror(f));
+
+  unsigned int n_outputs;
+  if(fscanf(f,"outputs: %u ",&n_outputs)!=1) syntax_error(f,"expected number of outputs");
+  node_p* outputs = malloc(n_outputs*sizeof(node_p));
+  for(i=0;i<n_outputs;i++) {
+    char output_name[node_name_maxlen];
+    if(fscanf(f,node_name_fmt,output_name)!=1) syntax_error(f,"expected output name");
+    struct node n_search[1] = {{.name=output_name}};
+    outputs[i] = *(node_p*)tfind((void*)n_search,name_lookup,cmp_name);
+    if(!outputs[i]) fprintf(stderr,"no such node %s",output_name),exit(2);
+  }
+
+  if(argc-2<n_inputs) fprintf(stderr,"Error: expected %d input values on the command line; got %d\n",n_inputs,argc-2),exit(3);
+  for(i=0;i<n_inputs;i++) {
+    global_inputs[i]->output=strtod(argv[i+2],NULL);
+  }
+
+  node_p node_to_run;
+  for(node_to_run = run_list_head; node_to_run; node_to_run = node_to_run->run_next) {
+    run_node(node_to_run);
+  }
+
+  for(i=0;i<n_outputs;i++) {
+    printf("output \"%s\": %lf\n",outputs[i]->name,outputs[i]->output);
+  }
   return 0;
 }
