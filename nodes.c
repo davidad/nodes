@@ -112,6 +112,11 @@ int main(int argc, char* argv[]) {
       // Parse gate_type sigil
       char c;
       if(fscanf(f,"%1[&|] ",&c)!=1) break;
+      gate_type t;
+      switch(c) {
+        case '&': t=AND; break;
+        case '|': t=OR;  break;
+      }
 
       // Parse input names
       char input_name[node_name_maxlen];
@@ -125,11 +130,6 @@ int main(int argc, char* argv[]) {
       }
       
       // Make the node
-      gate_type t;
-      switch(c) {
-        case '&': t=AND; break;
-        case '|': t=OR;  break;
-      }
       node_p n = make_node(t,n_inputs,inputs);
       free(inputs);
 
