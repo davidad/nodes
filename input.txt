@@ -1,0 +1,11 @@
+imports: 2
+  subnode.txt    -> sn
+  transnode.txt  -> tn
+inputs: 3
+  A B C
+sn A B -> and_node1
+sn B C -> and_node2
+sn A C -> and_node3
+tn and_node1.C and_node2.C and_node3.C -> or_node1
+outputs: 1
+  or_node1

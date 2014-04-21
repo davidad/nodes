@@ -83,8 +83,8 @@ int main(int argc, char* argv[]) {
   FILE* f = fopen(argv[1],"r"); if(f==NULL) perror("Error opening circuit file");
   unsigned int n_inputs, i;
   void* name_lookup[1] = {NULL};
-  node_p* global_inputs;
 
+  node_p* global_inputs;
   { /* Parse inputs block, formatted like this:
      *   inputs: 3
      *     A B C
