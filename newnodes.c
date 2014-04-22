@@ -27,18 +27,25 @@ typedef struct node {
   } *cxn;
 } node_t;
 
-node_t* empty_circuit(size_t pin_size) {
+node_t* empty_circuit(size_t pin_size, uint64_t input_pins, uint64_t output_pins) {
   node_t* circuit = calloc(1,sizeof(node_t));
   circuit->pin_size = pin_size;
+  circuit->input0 = 0;
+  circuit->inputM = input_pins;
+  circuit->output0 = input_pins;
+  circuit->outputN = input_pins+output_pins;
+  return circuit;
 }
 
 int add_pins(node_t* parent, uint64_t n_pins) {
   if(!parent) return 0;
   int i; node_t** pp;
-  for(i=0,pp=*(parent->parents); i<parent->n_parents; i++,pp++) {
-    // v this condition checks that we're adding to a youngest sibling
-    if((*pp)->output0 - (*pp)->input0 != parent->outputN || !add_pins(*pp,n_pins)) return 0;
-    // TODO actually handle non-youngest-sibling case, instead of bailing
+  if(parent->n_parents > 0) {
+    for(i=0,pp=*(parent->parents); i<parent->n_parents; i++,pp++) {
+      // v this condition checks that we're adding to a youngest sibling
+      if((*pp)->output0 - (*pp)->input0 != parent->outputN || !add_pins(*pp,n_pins)) return 0;
+      // TODO actually handle non-youngest-sibling case, instead of bailing
+    }
   }
   parent->output0 += n_pins;
   parent->outputN += n_pins;
@@ -122,6 +129,39 @@ node_t* copy_node(node_t* parent, node_t* n) {
   return result;
 }
 
+int connect_by_names(node_t* p, char* from_name, uint64_t out_pin, char* to_name, uint64_t in_pin) {
+  uint64_t from_pin, to_pin;
+  int i;
+
+  if(!from_name) {
+    from_pin=p->input0+out_pin;
+    if(from_pin<p->inputM);
+      else return 1 | 1<<2;
+  } else {
+    for(i=0;i<p->k;i++) if(!strcmp(p->subnodes[i].node_name,from_name)) break;
+    if(i<p->k) from_pin = p->subnodes[i].output0+out_pin;
+      else return 2 | 1<<2;
+  }
+  if(!to_name) {
+    to_pin=p->output0+in_pin;
+    if(to_pin<p->outputN);
+      else return 1 | 2<<2;
+  } else {
+    for(i=0;i<p->k;i++) if(!strcmp(p->subnodes[i].node_name,to_name)) break;
+    if(i<p->k) to_pin = p->subnodes[i].output0+in_pin;
+      else return 2 | 2<<2;
+  }
+
+  p->cxn = realloc(p->cxn, ++p->ncxn);
+  p->cxn[p->ncxn-1].from_pin = from_pin;
+  p->cxn[p->ncxn-1].to_pin = to_pin;
+  return 0;
+}
+
 int main() {
+  node_t* circuit = empty_circuit(sizeof(double),0,1);
+  double constant_one = 1.0;
+  insert_constant_node(circuit,(void*)&constant_one,"constant one");
+  connect_by_names(circuit,"constant one",0,NULL,0);
   return 0;
 }
