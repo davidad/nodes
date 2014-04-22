@@ -1,12 +1,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
-typedef void (*node_function)(void** inputs, void** outputs);
+typedef void (*node_function)(void* inputs, void* outputs);
 
 typedef struct node {
-  size_t pin_size;
-  void* pins[2]; //double buffer. NULL unless this is the top-level circuit
+  uint64_t lg2_pin_size;
+  void* pins;
   uint64_t n_parents;
   struct node*** parents;
   uint64_t input0;  //index of first external input  pin w.r.t. parent
@@ -27,13 +28,16 @@ typedef struct node {
   } *cxn;
 } node_t;
 
-node_t* empty_circuit(size_t pin_size, uint64_t input_pins, uint64_t output_pins) {
+node_t* empty_circuit(uint64_t pin_size, uint64_t input_pins, uint64_t output_pins) {
   node_t* circuit = calloc(1,sizeof(node_t));
-  circuit->pin_size = pin_size;
+  if(pin_size==0) pin_size++;
+  circuit->lg2_pin_size = 64-__builtin_clzll(pin_size-1);
+  pin_size = 1<<(circuit->lg2_pin_size);
   circuit->input0 = 0;
   circuit->inputM = input_pins;
   circuit->output0 = input_pins;
   circuit->outputN = input_pins+output_pins;
+  circuit->pins = calloc(pin_size,input_pins+output_pins);
   return circuit;
 }
 
@@ -50,9 +54,7 @@ int add_pins(node_t* parent, uint64_t n_pins) {
   parent->output0 += n_pins;
   parent->outputN += n_pins;
   if(parent->n_parents == 0) {
-    for(i=0;i<=1;i++)
-      parent->pins[i] =
-        realloc(parent->pins[i],(parent->pin_size)*(parent->outputN));
+    parent->pins = realloc(parent->pins,(1<<parent->lg2_pin_size)*(parent->outputN));
   }
   return 1;
 }
@@ -69,6 +71,7 @@ node_t* insert_new_node(node_t* parent, uint64_t input_pins, uint64_t output_pin
     result->inputM = offs + input_pins;
     result->output0 = result->inputM;
     result->outputN = result->inputM + output_pins;
+    result->lg2_pin_size = parent->lg2_pin_size;
     node_t** parents = malloc(sizeof(node_t*));
     result->parents = malloc(sizeof(node_t**));
     *(result->parents) = parents;
@@ -121,10 +124,10 @@ node_t* copy_node(node_t* parent, node_t* n) {
     parent->subnodes = realloc(parent->subnodes,sizeof(node_t)*++(parent->k));
     result = &parent->subnodes[parent->k-1];
     memcpy(result, n, sizeof(node_t));
-    result->input0 = offs;
-    result->inputM = offs - n->input0 + n->inputM;
-    result->output0 = offs - n->input0 + n->output0;
-    result->outputN = offs - n->input0 + n->outputN;
+    result->input0  = offs;        offs-=n->input0;
+    result->inputM  = n->inputM  + offs;
+    result->output0 = n->output0 + offs;
+    result->outputN = n->outputN + offs;
   }
   return result;
 }
@@ -158,10 +161,54 @@ int connect_by_names(node_t* p, char* from_name, uint64_t out_pin, char* to_name
   return 0;
 }
 
+int run_node(node_t* n, uint64_t lg2_pin_size, uint64_t pin_offs, void* pins) {
+#define PIN(x) ((((x)+pin_offs)<<lg2_pin_size)+pins)
+  const uint64_t pin_size = 1<<lg2_pin_size;
+  int i;
+  if(n->output_constant) {
+    for(i=n->output0;i<n->outputN;i++) {
+      memcpy(PIN(i),n->output_constant,pin_size);
+    }
+    return 0;
+  } else if (n->function) {
+    void* inputs  = PIN(n->input0);
+    void* outputs = PIN(n->output0);
+    n->function(inputs,outputs);
+  } else if (n->subnodes) {
+    pin_offs+=n->input0;
+    node_t* subnode;
+    for(i=0, subnode=n->subnodes; i<n->k; i++, subnode++) {
+      run_node(subnode,lg2_pin_size,pin_offs,pins);
+    }
+    struct connection* cxn;
+    for(i=0, cxn=n->cxn; i<n->ncxn; i++, cxn++)  {
+      memcpy(PIN(cxn->to_pin),PIN(cxn->from_pin),pin_size);
+    }
+  } else {
+    return -2;
+  }
+#undef PIN
+}
+
+int run_circuit(node_t* n) {
+  return run_node(n,n->lg2_pin_size,0,n->pins);
+}
+
+inline void* get_output(node_t* n, uint64_t out_pin) {
+  return ((n->output0+out_pin)<<n->lg2_pin_size)+n->pins;
+}
+
+inline void set_input(node_t* n, uint64_t in_pin, const void* value) {
+  uint64_t l2ps = n->lg2_pin_size;
+  memcpy(((n->input0+in_pin)<<l2ps)+n->pins,value,1<<l2ps);
+}
+
 int main() {
   node_t* circuit = empty_circuit(sizeof(double),0,1);
   double constant_one = 1.0;
   insert_constant_node(circuit,(void*)&constant_one,"constant one");
   connect_by_names(circuit,"constant one",0,NULL,0);
+  run_circuit(circuit);
+  printf("output: %lf\n",*(double*)get_output(circuit,0));
   return 0;
 }
