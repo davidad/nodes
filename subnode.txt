@@ -1,6 +1,7 @@
-inputs: 2
- A B
-& A B -> C
-| A B -> D
-outputs: 2
- C D
+example_subnode: .A, .B -> .C, .D
+an1 <= and_node
+or1 <= or_node
+.A -> an1.A, or1.A
+.B -> an1.B, or1.B
+an1.out -> .C
+or1.out -> .D

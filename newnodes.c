@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -136,6 +137,7 @@ int connect_by_names(node_t* p, char* from_name, uint64_t out_pin, char* to_name
   uint64_t from_pin, to_pin;
   int i;
 
+  //TODO: use tsearch here
   if(!from_name) {
     from_pin=p->input0+out_pin;
     if(from_pin<p->inputM);
@@ -201,6 +203,40 @@ inline void* get_output(node_t* n, uint64_t out_pin) {
 inline void set_input(node_t* n, uint64_t in_pin, const void* value) {
   uint64_t l2ps = n->lg2_pin_size;
   memcpy(((n->input0+in_pin)<<l2ps)+n->pins,value,1<<l2ps);
+}
+
+typedef struct { char* s; node_t n; } symbol_t;
+static symbol_t stdlib[];
+void load_stdlib(void) {
+  stdlib = {
+    {"and_node", NULL},
+    {"or_node",  NULL}
+  };
+}
+
+void parse_circuit(char* filename, size_t pin_size) {
+  FILE* f = fopen(filename,"r"); if(f==NULL) perror("Error opening circuit file");
+
+  /* Parse header block-- example_subnode: A, B -> C, D */
+  char* node_name[1], input_names[256], output_names[256];
+  if(fscanf(f,"%ms: ",node_name)!=1) syntax_error("Missing colon?");
+  int n_inputs=0, n_outputs=0;
+  do {
+    if(fscanf(f,"%m[^-, ]s",input_names+(n_inputs++))!=1) break;
+  } while(fgetc(f)==',');
+  fscanf(f,"->");
+  do {
+    if(fscanf(f,"%m[^, ]s",output_names+(n_outputs++))!=1) break;
+  } while(fgetc(f)==',');
+  node_t* circuit = empty_circuit(pin_size,n_inputs,n_outputs);
+  circuit->node_name = *node_name;
+
+  /* Parse subnodes-- or1 <= or_node */
+  while(fscanf(f,"%ms <=",node_name)==1) {
+    char* prototype[1];
+    fscanf(f,"%ms",prototype);
+
+  }
 }
 
 int main() {
